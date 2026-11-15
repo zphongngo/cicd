@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ 'Thêm dự án' if is_new else 'Sửa dự án: ' ~ p.get('name','') }}</h1>
+<form method="post" class="card">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+
+<h2 style="margin-top:4px">1. Repository</h2>
+<div class="grid2">
+  <div><label>Tên project (duy nhất)</label><input type="text" name="name" id="name" value="{{ p.get('name','') }}" required
+      placeholder="my-web-app" maxlength="64" pattern="[A-Za-z0-9]([A-Za-z0-9._\-]{0,62}[A-Za-z0-9_\-])?"
+      title="Chữ cái không dấu, số, - _ . ; bắt đầu bằng chữ/số">
+    <div class="hint">Không trùng với project khác. Chỉ gồm chữ cái không dấu, số, <code>-</code> <code>_</code> <code>.</code> (dùng làm tên thư mục).</div></div>
+  <div><label>Nhà cung cấp</label>
+    <select name="provider" id="provider">
+      <option value="github" {{ 'selected' if p.get('provider')=='github' }}>GitHub</option>
+      <option value="bitbucket" {{ 'selected' if p.get('provider')=='bitbucket' }}>Bitbucket Cloud (bitbucket.org)</option>
+      <option value="bitbucket-server" {{ 'selected' if p.get('provider')=='bitbucket-server' }}>Bitbucket Server / Data Center (server riêng của công ty)</option>
+    </select></div>
+</div>
+<label>URL repository (HTTPS)</label>
+<input type="text" name="repo_url" id="repo_url" value="{{ p.get('repo_url','') }}" required class="mono"
+       placeholder="https://bbk-rndsoft.ingenico.com/scm/~username/worklog.git"
+       data-server="{{ bbk_server }}" data-auto="{{ '1' if not p.get('repo_url') else '' }}">
+<div class="hint" id="urlhint">Copy từ nút <b>Clone → HTTP(S)</b>. Bỏ phần <code>user@</code> nếu có.</div>
+<label>Nhánh (branch) theo dõi</label>
+<input type="text" name="branch" value="{{ p.get('branch','main') }}" required>
+
+<h2>2. Đăng nhập</h2>
+<label>Kiểu xác thực</label>
+<select name="auth_mode" id="auth_mode">
+  <option value="basic" {{ 'selected' if p.get('auth_mode','basic')=='basic' }}>Username + token (token cá nhân)</option>
+  <option value="bearer" {{ 'selected' if p.get('auth_mode')=='bearer' }}>Bearer token (HTTP access token của repository / project - Bitbucket Server)</option>
+</select>
+<div class="hint" id="authhint"></div>
+<div class="grid2">
+  <div><label>Username</label><input type="text" name="username" id="username" value="{{ p.get('username','') }}" autocomplete="off">
+    <div class="hint" id="userhint"></div></div>
+  <div><label>Token truy cập {% if not is_new %}<span class="muted small">(để trống = giữ token cũ)</span>{% endif %}</label>
+    <input type="password" name="token" autocomplete="new-password" placeholder="{{ '••••••• (đã lưu)' if (not is_new and p.get('token_enc')) else 'github_pat_... / ATATT...' }}">
+    <div class="hint" id="tokenhint"></div>
+    {% if not is_new %}<label style="font-weight:400"><input type="checkbox" name="clear_token"> Xoá token (repo public)</label>{% endif %}
+  </div>
+</div>
+<div class="hint">⚠ GitHub và Bitbucket <b>không cho phép dùng mật khẩu tài khoản</b> để kéo code qua git. Hãy tạo token (xem README). Repo public có thể để trống token. Token được mã hoá khi lưu.</div>
+
+<h2>3. Thư mục lưu project trên máy</h2>
+<label>Thư mục chứa project</label>
+<div class="inputgroup">
+  <input type="text" name="parent_dir" id="parent_dir" value="{{ p.get('parent_dir') or base_dir }}" required class="mono" data-sep="{{ sep }}">
+  <button type="button" class="btn" onclick="pickFolder('parent_dir')">📁 Chọn thư mục</button>
+</div>
+<div class="card" style="margin:8px 0 0;padding:10px 14px">
+  📁 Project sẽ được lưu tại: <code id="dirpreview" style="font-weight:700"></code>
+  <div class="hint" style="margin:2px 0 0">Hệ thống tự tạo thư mục con mang <b>tên project</b> bên trong thư mục bạn chọn.
+  {% if not is_new %}Nếu đổi tên project hoặc thư mục chứa, thư mục hiện tại (<code>{{ p.get('deploy_dir','') }}</code>) sẽ được <b>di chuyển</b> sang vị trí mới.{% endif %}</div>
+</div>
+<div class="hint">Lần chạy đầu: <code>git clone</code> vào thư mục này. Các lần sau: <code>git fetch</code> + <code>reset --hard</code>
+(sửa đổi chưa commit trên file trong repo sẽ bị ghi đè; file git không quản lý như <code>.env</code>, <code>node_modules</code> được giữ nguyên).</div>
+
+<h2>4. Python</h2>
+<label style="font-weight:400"><input type="checkbox" name="python_venv" id="python_venv" {{ 'checked' if p.get('python_venv') }}>
+  <b>Dự án Python:</b> tự tạo <code>{{ venv_dir }}</code> trong thư mục project và cài thư viện</label>
+<div class="hint">Sau khi lấy code: tạo <code>&lt;thư mục project&gt;{{ sep }}{{ venv_dir }}</code> (nếu chưa có), cài thư viện từ
+<code>requirements.txt</code> (hoặc <code>pyproject.toml</code> / <code>setup.py</code>). Lần sau chỉ cài lại khi file này thay đổi.
+Các lệnh bên dưới tự chạy trong <code>{{ venv_dir }}</code> nên chỉ cần viết <code>python main.py</code>, <code>pytest</code>…</div>
+<div id="pyopts">
+  <label>Python dùng để tạo .venv <span class="muted small">(tuỳ chọn)</span></label>
+  <input type="text" name="python_cmd" value="{{ p.get('python_cmd','') }}" class="mono"
+         placeholder="để trống = {{ default_python }}">
+  <div class="hint">Để trống là dùng Python đang chạy CICD App. Muốn dùng phiên bản khác thì nhập vd.
+    {% if sep == '\\' %}<code>py -3.11</code> hoặc <code>C:\Python311\python.exe</code>{% else %}<code>python3.11</code> hoặc <code>/usr/bin/python3.12</code>{% endif %}.
+    Đổi giá trị này thì <code>{{ venv_dir }}</code> sẽ được tạo lại ở lần chạy sau.</div>
+</div>
+
+<label>Các lệnh build / deploy (mỗi dòng là một bước)</label>
+<textarea name="commands" placeholder="pytest&#10;python manage.py migrate&#10;sudo systemctl restart my-app">{{ p.get('commands','') }}</textarea>
+<div class="hint">Chạy bằng <code>bash</code> trong thư mục project (đã kích hoạt <code>{{ venv_dir }}</code> nếu bật ở trên). Dòng bắt đầu bằng <code>#</code> bị bỏ qua.
+Nếu repo có file <code>.cicd.yml</code> thì file đó được ưu tiên thay cho ô này.
+Không đặt lệnh chạy mãi (vd. <code>python app.py</code> là web server) ở đây - hãy chạy app bằng systemd / dịch vụ và chỉ restart nó.</div>
+
+<h2 id="deploy">5. Deploy - chạy app</h2>
+<div class="hint" style="margin-top:0">Bước cuối của pipeline, chạy sau khi đã cập nhật mã nguồn, tạo <code>{{ venv_dir }}</code> và cài thư viện.</div>
+<label>Kiểu chạy</label>
+<select name="run_mode" id="run_mode">
+  <option value="service" {{ 'selected' if p.get('run_mode','service')=='service' }}>Chạy nền liên tục (web app, Streamlit, bot...) - dừng bản cũ, khởi động bản mới</option>
+  <option value="once" {{ 'selected' if p.get('run_mode')=='once' }}>Chạy 1 lần và chờ kết thúc (script, job)</option>
+</select>
+<label>Lệnh chạy app <span class="muted small">(mỗi dòng là một tiến trình; để trống = không deploy)</span></label>
+<textarea name="run_cmd" id="run_cmd" style="min-height:70px"
+  placeholder="Để trống = tự nhận diện (FastAPI, Streamlit, Flask, Django, main.py)&#10;vd: python -m uvicorn app.main:app --host 127.0.0.1 --port 8000">{{ p.get('run_cmd','') }}</textarea>
+<label style="font-weight:400"><input type="checkbox" name="run_detect" {{ 'checked' if p.get('run_detect') }}>
+  Để trống thì <b>tự nhận diện lệnh chạy app</b> từ mã nguồn (FastAPI → uvicorn, Streamlit, Flask, Django, <code>python main.py</code>),
+  tự chọn port còn trống và URL kiểm tra</label>
+<div class="hint">Chạy trong thư mục project{% if venv_dir %} (trong <code>{{ venv_dir }}</code> nếu bật Dự án Python){% endif %}.
+  <span id="svc_hint">Mỗi dòng là một tiến trình chạy nền, output ghi vào log riêng (xem ở trang project). App vẫn chạy khi đóng CICD App.</span></div>
+<div class="grid2" id="svc_opts">
+  <div><label>Theo dõi sau khi khởi động (giây)</label>
+    <input type="number" name="run_wait" min="1" max="600" value="{{ p.get('run_wait',8) }}">
+    <div class="hint">Nếu app thoát trong khoảng này → deploy thất bại, hiện log lỗi của app.</div></div>
+  <div><label>URL kiểm tra <span class="muted small">(tuỳ chọn)</span></label>
+    <input type="text" name="run_health_url" value="{{ p.get('run_health_url','') }}" class="mono"
+           placeholder="http://127.0.0.1:8899/_stcore/health">
+    <div class="hint">Deploy chỉ thành công khi URL này phản hồi (Streamlit: <code>/_stcore/health</code>).</div></div>
+</div>
+<label style="font-weight:400" id="autostart_lbl"><input type="checkbox" name="app_autostart" {{ 'checked' if p.get('app_autostart') }}>
+  Tự chạy lại app khi CICD App khởi động (vd. sau khi khởi động lại máy)</label>
+
+<h2>6. Tự động hoá</h2>
+<div class="grid2">
+  <div><label>Kiểm tra commit mới mỗi (giây)</label><input type="number" name="poll_interval" min="0" value="{{ p.get('poll_interval',60) }}">
+    <div class="hint">0 = tắt polling (chỉ chạy bằng tay hoặc webhook).</div></div>
+  <div><label>Timeout mỗi bước (giây)</label><input type="number" name="step_timeout" min="10" value="{{ p.get('step_timeout',1800) }}"></div>
+</div>
+<label style="font-weight:400"><input type="checkbox" name="enabled" {{ 'checked' if p.get('enabled') }}> Bật tự động chạy khi có commit mới</label>
+
+<p style="margin-top:20px" class="row">
+  <button class="btn primary">{{ 'Tạo dự án' if is_new else 'Lưu' }}</button>
+  <a class="btn" href="{{ url_for('index') if is_new else url_for('project_view', pid=p.id) }}">Huỷ</a>
+</p>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+const H = {
+  github: {basic: ["Username GitHub của bạn.",
+                   "Personal Access Token: GitHub → Settings → Developer settings → Fine-grained tokens, chọn repo, quyền Contents: Read-only."],
+           auth: "GitHub: chọn 'Username + token'."},
+  bitbucket: {basic: ["API token: nhập x-bitbucket-api-token-auth. App password (cũ): nhập username Bitbucket.",
+                      "API token: id.atlassian.com → Security → API tokens → Create API token with scopes → Bitbucket → read:repository:bitbucket."],
+              auth: "Bitbucket Cloud: chọn 'Username + token'."},
+  'bitbucket-server': {
+      basic: ["Username đăng nhập Bitbucket của bạn.",
+              "Token cá nhân: ảnh đại diện → Manage account → HTTP access tokens → Create token, quyền Repository read."],
+      bearer: ["Username bbk của bạn - chỉ dùng để tạo URL ~username, không dùng để xác thực.",
+               "Repository settings → HTTP access tokens → Create token, quyền Repository read. Copy ngay vì token chỉ hiện 1 lần."],
+      auth: "Token tạo trong Repository settings / Project settings → chọn 'Bearer token'. Token tạo trong Manage account (cá nhân) → chọn 'Username + token'. KHÔNG dùng 'Access keys' (đó là SSH key)."}
+};
+const sel = document.getElementById('provider'), authSel = document.getElementById('auth_mode');
+function upd(){
+  const h = H[sel.value], mode = (authSel.value === 'bearer' && h.bearer) ? 'bearer' : 'basic';
+  authSel.querySelector('option[value=bearer]').disabled = !h.bearer;
+  if (!h.bearer) authSel.value = 'basic';
+  document.getElementById('authhint').textContent = h.auth;
+  document.getElementById('userhint').textContent = h[mode][0];
+  document.getElementById('tokenhint').textContent = h[mode][1];
+  fillUrl();
+}
+
+const nameEl = document.getElementById('name'), userEl = document.getElementById('username');
+
+// URL repo bbk: <server>/scm/~<username>/<tên project>.git - tự điền cho tới khi người dùng tự sửa URL
+const urlEl = document.getElementById('repo_url');
+let urlAuto = urlEl.dataset.auto === '1';
+function fillUrl(){
+  const server = urlEl.dataset.server.replace(/\/+$/, ''), isBbk = sel.value === 'bitbucket-server';
+  const hint = document.getElementById('urlhint');
+  if (isBbk && server) {
+    const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    hint.innerHTML = 'Bitbucket Server: <code>' + esc(server) + '/scm/~&lt;username&gt;/&lt;tên repo&gt;.git</code> - tự điền từ Username + Tên project (sửa được).';
+  } else if (isBbk) {
+    hint.innerHTML = 'Dạng <code>https://bbk-rndsoft.ingenico.com/scm/~username/worklog.git</code>. Điền Bitbucket Server URL ở <a href="{{ url_for('settings') }}">⚙ Cài đặt</a> để tự điền URL.';
+  } else {
+    hint.innerHTML = 'Copy từ nút <b>Code → HTTPS</b> (GitHub) hoặc <b>Clone → HTTPS</b> (Bitbucket). Bỏ phần <code>user@</code> nếu có.';
+  }
+  if (!urlAuto || !isBbk || !server) return;
+  const u = userEl.value.trim().toLowerCase(), n = nameEl.value.trim().toLowerCase();
+  urlEl.value = (u && n) ? `${server}/scm/~${u}/${n}.git` : '';
+}
+urlEl.addEventListener('input', () => { urlAuto = urlEl.value.trim() === ''; });
+nameEl.addEventListener('input', fillUrl);
+userEl.addEventListener('input', fillUrl);
+
+// Xem trước thư mục project = <thư mục chứa>/<tên project>
+const parentEl = document.getElementById('parent_dir');
+function preview(){
+  const sep = parentEl.dataset.sep, parent = parentEl.value.trim().replace(/[\\/]+$/, ''), n = nameEl.value.trim();
+  document.getElementById('dirpreview').textContent = (parent || '…') + sep + (n || '<tên project>');
+}
+nameEl.addEventListener('input', preview);
+parentEl.addEventListener('input', preview);
+
+sel.addEventListener('change', upd); authSel.addEventListener('change', upd);
+upd(); preview();
+
+const pyChk = document.getElementById('python_venv');
+function pyUpd(){ document.getElementById('pyopts').hidden = !pyChk.checked; }
+pyChk.addEventListener('change', pyUpd); pyUpd();
+
+const modeSel = document.getElementById('run_mode');
+function modeUpd(){
+  const svc = modeSel.value === 'service';
+  for (const id of ['svc_opts', 'svc_hint', 'autostart_lbl']) document.getElementById(id).hidden = !svc;
+}
+modeSel.addEventListener('change', modeUpd); modeUpd();
+</script>
+{% endblock %}

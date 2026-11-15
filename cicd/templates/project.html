@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row" style="margin-bottom:12px">
+  <div style="flex:1"><a class="small" href="{{ url_for('index') }}">← Dự án</a><h1>{{ p.name }}</h1></div>
+  {% if current_run %}
+  <a class="btn primary" href="{{ url_for('run_view', rid=current_run.id) }}">⏳ Đang chạy - xem tiến trình</a>
+  {% else %}
+  <form class="inline" method="post" action="{{ url_for('project_run', pid=p.id) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn primary">▶ Chạy ngay</button></form>
+  {% endif %}
+  <form class="inline" method="post" action="{{ url_for('project_test', pid=p.id) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn">🔌 Kiểm tra kết nối</button></form>
+  {% set app_on = app|selectattr('running')|list %}
+  <form class="inline" method="post" action="{{ url_for('project_app', pid=p.id, action='stop' if app_on else 'start') }}"
+        {% if app_on %}onsubmit="return confirm('Tắt app {{ p.name }}?')"{% endif %}>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn {{ 'danger' if app_on }}">{{ '■ Tắt app' if app_on else '▶ Bật app' }}</button></form>
+  <a class="btn" href="{{ url_for('project_edit', pid=p.id) }}">✎ Sửa</a>
+  <form class="inline" method="post" action="{{ url_for('project_delete', pid=p.id) }}" onsubmit="return confirm('Xoá dự án và toàn bộ lịch sử run? (Thư mục app trên máy không bị xoá)')">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn danger">Xoá</button></form>
+</div>
+
+<div id="livebox" class="card" style="border-color:var(--run)" hidden>
+  <div class="row"><b id="lb_title" style="flex:1">⏳ Đang chạy</b><a class="btn" id="lb_link" href="#">Xem log đầy đủ →</a></div>
+  <div class="progress"><div id="lb_bar"></div></div>
+  <div class="small" id="lb_step"></div>
+  <pre class="log" id="lb_log" style="max-height:220px;margin-top:8px"></pre>
+</div>
+
+{% if p.last_poll_error and p.last_poll_error.startswith(pause_mark) %}
+<div class="errbox"><b>⛔ Đã tắt tự động chạy vì đăng nhập repository thất bại</b> <span class="small muted">({{ p.last_poll_at|dt }})</span>
+<div class="small">Để tránh khoá tài khoản, CICD App không tự thử lại. Các bước xử lý:
+  1) nếu tài khoản bị khoá (CAPTCHA): đăng xuất rồi đăng nhập lại Bitbucket trên trình duyệt và giải CAPTCHA;
+  2) <a href="{{ url_for('project_edit', pid=p.id) }}">Sửa project</a>: kiểm tra Kiểu xác thực + Token;
+  3) bấm 🔌 Kiểm tra kết nối; 4) thành công thì bấm Bật lại tự động.</div>
+<pre>{{ p.last_poll_error[pause_mark|length:].strip() }}</pre>
+<form class="inline" method="post" action="{{ url_for('project_enable', pid=p.id) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="btn primary" style="margin-top:8px">▶ Bật lại tự động</button></form></div>
+{% elif p.last_poll_error %}
+<div class="errbox"><b>⚠ Lần kiểm tra repository gần nhất bị lỗi</b> <span class="small muted">({{ p.last_poll_at|dt }})</span>
+<pre>{{ p.last_poll_error }}</pre></div>
+{% endif %}
+
+<div class="card kv">
+  <div>Nhà cung cấp</div><div>{{ {'github': 'GitHub', 'bitbucket': 'Bitbucket Cloud', 'bitbucket-server': 'Bitbucket Server / Data Center'}.get(p.provider, p.provider) }}
+    · {{ 'Bearer token' if p.auth_mode == 'bearer' else 'Username + token' }}</div>
+  <div>Repository</div><div class="mono">{{ p.repo_url }}</div>
+  <div>Nhánh</div><div><code>{{ p.branch }}</code></div>
+  <div>Username / Token</div><div>{{ p.username or '-' }} / {{ 'đã lưu (mã hoá)' if p.token_enc else 'không có (repo public)' }}</div>
+  <div>Thư mục project</div><div><span class="mono" id="pdir">{{ p.deploy_dir }}</span>
+    <div class="row" style="margin-top:4px">
+      <form class="inline" method="post" action="{{ url_for('project_open_folder', pid=p.id) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn">📂 Mở thư mục</button></form>
+      <button type="button" class="btn" onclick="navigator.clipboard.writeText(document.getElementById('pdir').textContent).then(()=>{this.textContent='✔ Đã copy'})">📋 Copy đường dẫn</button>
+    </div></div>
+  <div>Python</div><div>{% if p.python_venv %}Tự tạo <code>{{ venv_dir }}</code> + cài thư viện
+    <span class="muted small">(Python: {{ p.python_cmd or default_python }})</span>{% else %}Tắt{% endif %}</div>
+  <div>Tự động</div><div>{% if not p.enabled %}Tắt{% elif p.poll_interval %}Kiểm tra mỗi {{ p.poll_interval }}s (lần cuối: {{ p.last_poll_at|dt }}){% else %}Chỉ qua webhook{% endif %}</div>
+  <div>Commit đã xử lý</div><div class="mono">{{ (p.last_sha or '-')[:10] }}</div>
+  <div>Webhook URL</div><div><code class="small" style="word-break:break-all">{{ webhook_url }}</code>
+    <div class="hint">Chỉ cần khi máy có địa chỉ public (hoặc dùng Cloudflare Tunnel / ngrok). Nếu không, polling là đủ.</div></div>
+</div>
+
+{% if not p.run_cmd %}
+<div class="card" style="border-color:var(--run)"><b>ℹ Chưa cấu hình chạy app.</b>
+  Pipeline chỉ cập nhật mã nguồn{{ ' + môi trường Python' if p.python_venv }}, chưa chạy app.
+  Vào <a href="{{ url_for('project_edit', pid=p.id) }}">✎ Sửa</a> → mục <b>5. Deploy - chạy app</b> để nhập lệnh chạy.</div>
+{% endif %}
+{% if p.run_cmd %}
+<h2>App {% if p.run_mode == 'once' %}<span class="muted small">(chạy 1 lần ở cuối mỗi pipeline)</span>{% endif %}</h2>
+<div class="card">
+  {% if p.run_mode == 'service' %}
+  <div class="row" style="margin-bottom:8px">
+    {% set any_running = app|selectattr('running')|list %}
+    <span class="badge {{ 'b-success' if any_running else 'b-none' }}">{{ '● đang chạy' if any_running else '○ đã dừng' }}</span>
+    <span class="sp" style="flex:1"></span>
+    {% for a, label in [('start', '▶ Khởi động'), ('restart', '↻ Khởi động lại'), ('stop', '■ Dừng')] %}
+    <form class="inline" method="post" action="{{ url_for('project_app', pid=p.id, action=a) }}"
+          {% if a == 'stop' %}onsubmit="return confirm('Dừng app?')"{% endif %}>
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn {{ 'danger' if a == 'stop' }}">{{ label }}</button></form>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="tablewrap"><table>
+    <tr><th>#</th><th>Lệnh</th>{% if p.run_mode == 'service' %}<th>Trạng thái</th><th>Từ lúc</th>{% endif %}<th></th></tr>
+    {% for a in app %}
+    <tr><td>{{ a.idx + 1 }}</td><td><code class="small">{{ a.cmd }}</code></td>
+      {% if p.run_mode == 'service' %}
+      <td>{% if a.running %}<span class="badge b-success">PID {{ a.pid }}</span>{% else %}<span class="badge b-none">dừng</span>{% endif %}</td>
+      <td class="small">{{ a.started_at|dt if a.running else '-' }}</td>
+      <td>{% if a.has_log %}<a href="{{ url_for('project_applog', pid=p.id, n=a.idx + 1) }}">📄 Log app</a>{% endif %}</td>
+      {% else %}<td class="small muted">output nằm trong log của từng run</td>{% endif %}
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% if p.run_health_url and p.run_mode == 'service' %}<div class="hint">URL kiểm tra: <a href="{{ p.run_health_url }}" target="_blank">{{ p.run_health_url }}</a></div>{% endif %}
+</div>
+{% endif %}
+
+<h2>Lịch sử chạy</h2>
+{% if not runs %}<div class="card muted">Chưa có run nào.</div>{% else %}
+<div class="card tablewrap" style="padding:4px 8px">
+<table>
+<tr><th>#</th><th>Trạng thái</th><th>Commit</th><th>Kích hoạt</th><th>Bắt đầu</th><th>Thời gian</th><th>Lỗi tại</th></tr>
+{% for r in runs %}
+<tr>
+  <td><a href="{{ url_for('run_view', rid=r.id) }}">#{{ r.id }}</a></td>
+  <td><a href="{{ url_for('run_view', rid=r.id) }}"><span class="badge b-{{ r.status }}">{{ r.status }}</span></a></td>
+  <td class="small"><code>{{ (r.commit_sha or '')[:8] }}</code> {{ (r.commit_msg or '')[:60] }}</td>
+  <td class="small">{{ r.trigger }}</td>
+  <td class="small">{{ r.started_at|dt }}</td>
+  <td class="small">{{ r|dur }}</td>
+  <td class="small" style="color:var(--err)">{{ r.failed_step or '' }}</td>
+</tr>
+{% endfor %}
+</table></div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+// Khung tiến trình trực tiếp: hiện khi project có run đang chạy (kể cả run do bộ lập lịch tự khởi động)
+(function(){
+  const CUR = "{{ url_for('project_current_run', pid=p.id) }}";
+  const RUN_API = "{{ url_for('run_api', rid=0) }}".replace(/0$/, '');
+  const RUN_PAGE = "{{ url_for('run_view', rid=0) }}".replace(/0$/, '');
+  let rid = {{ current_run.id if current_run else 'null' }}, off = 0, lines = [];
+  const $ = id => document.getElementById(id);
+  async function tick(){
+    try {
+      if (!rid) {
+        const c = await (await fetch(CUR)).json();
+        if (!c.run_id) { setTimeout(tick, 3000); return; }
+        rid = c.run_id; off = 0; lines = [];
+      }
+      const d = await (await fetch(RUN_API + rid + '?offset=' + off)).json();
+      off = d.offset;
+      if (d.log) lines = lines.concat(d.log.replace(/\n$/, '').split('\n')).slice(-12);
+      const done = d.steps.filter(s => ['success', 'failed', 'skipped'].includes(s.status)).length;
+      const cur = d.steps.find(s => s.status === 'running');
+      $('livebox').hidden = false;
+      $('lb_link').href = RUN_PAGE + rid;
+      $('lb_title').textContent = (d.status === 'running' ? '⏳ Đang chạy run #' : (d.status === 'success' ? '✔ Hoàn thành run #' : '✖ Thất bại run #')) + rid + ' · ' + d.duration;
+      $('lb_bar').style.width = (d.status === 'running' ? Math.max(5, 100 * done / Math.max(d.steps.length, 1)) : 100) + '%';
+      $('lb_bar').className = d.status === 'failed' ? 'err' : (d.status === 'success' ? 'ok' : '');
+      $('lb_step').textContent = cur ? `Bước ${cur.idx}/${d.steps.length}: ${cur.name}` : (d.failed_step ? 'Lỗi tại: ' + d.failed_step : '');
+      $('lb_log').textContent = lines.map(l => l.slice(11)).join('\n');
+      $('lb_log').scrollTop = $('lb_log').scrollHeight;
+      if (d.status === 'running') setTimeout(tick, 1500);
+      else setTimeout(() => location.reload(), 2000);   // xong -> tải lại để cập nhật lịch sử + trạng thái app
+    } catch (e) { setTimeout(tick, 3000); }
+  }
+  tick();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,30 @@
+# Đặt file này ở thư mục gốc repository của bạn với tên .cicd.yml
+# Nếu repo có file này, CICD App sẽ dùng nó thay cho các lệnh nhập trên web.
+# Mỗi bước chạy bằng bash trong thư mục chứa app, dừng ngay khi có lệnh lỗi.
+
+env:                       # biến môi trường dùng cho mọi bước (tuỳ chọn)
+  NODE_ENV: production
+
+steps:
+  - name: Cài thư viện
+    run: npm ci
+
+  - name: Chạy test
+    run: npm test
+    timeout: 600           # giây (tuỳ chọn, mặc định lấy theo cấu hình dự án)
+
+  - name: Build
+    run: npm run build
+
+  - name: Khởi động lại dịch vụ
+    run: |
+      sudo systemctl restart my-app
+      sleep 3
+      systemctl is-active my-app
+
+# Biến có sẵn trong mọi bước:
+#   CICD_RUN_ID, CICD_PROJECT, CICD_BRANCH, CICD_COMMIT, CICD_DEPLOY_DIR
+#
+# Ví dụ khác:
+#   Python:  pip install -r requirements.txt  ->  pytest  ->  sudo systemctl restart my-api
+#   Docker:  docker compose up -d --build

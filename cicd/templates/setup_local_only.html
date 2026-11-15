@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:520px;margin:40px auto">
+  <h1>Chưa thiết lập CICD App</h1>
+  <p>CICD App chưa có <b>mật khẩu quản trị</b>. Để an toàn, mật khẩu chỉ được tạo <b>trên chính máy đang chạy CICD App</b>
+     (tránh người khác trong mạng tạo trước).</p>
+  <p>Hãy mở trình duyệt trên máy đó và vào:</p>
+  {% for u in local_urls %}<p><code>{{ u }}</code></p>{% endfor %}
+  <p class="muted small">Sau khi tạo mật khẩu, bạn mở được CICD App từ máy này bằng địa chỉ IP của máy chạy CICD App và đăng nhập bằng mật khẩu đó.</p>
+</div>
+{% endblock %}

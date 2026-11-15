@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Log app - {{ p.name }}{% endblock %}
+{% block content %}
+{% set a = (app|selectattr('idx', 'equalto', n - 1)|list or [none])[0] %}
+<a class="small" href="{{ url_for('project_view', pid=p.id) }}">← {{ p.name }}</a>
+<div class="row" style="margin:2px 0 12px">
+  <h1 style="flex:1">Log app [{{ n }}] <span id="st" class="badge b-none">...</span></h1>
+  <label style="font-weight:400;margin:0"><input type="checkbox" id="follow" checked> Tự cuộn xuống cuối</label>
+</div>
+{% if a %}<div class="card small"><code>{{ a.cmd }}</code><div class="hint">File: <code>{{ a.log }}</code></div></div>{% endif %}
+<pre class="log" id="log"></pre>
+{% endblock %}
+{% block scripts %}
+<script>
+const API = "{{ url_for('project_applog_api', pid=p.id, n=n) }}";
+let offset = null;
+const logEl = document.getElementById('log');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function cls(l){
+  if (l.startsWith('=====')) return 'h';
+  if (/\b(error|exception|traceback|failed|critical)\b/i.test(l)) return 'e';
+  if (/\bwarn(ing)?\b/i.test(l)) return 'g';
+  return '';
+}
+async function poll(){
+  try {
+    const d = await (await fetch(API + (offset === null ? '' : '?offset=' + offset))).json();
+    if (d.log){
+      const html = d.log.replace(/\n$/, '').split('\n').map(l => { const c = cls(l); return c ? `<span class="${c}">${esc(l)}</span>` : esc(l); }).join('\n') + '\n';
+      logEl.insertAdjacentHTML('beforeend', html);
+      if (document.getElementById('follow').checked) logEl.scrollTop = logEl.scrollHeight;
+    }
+    offset = d.offset;
+    const st = document.getElementById('st');
+    st.textContent = d.running ? '● đang chạy - PID ' + d.pid : '○ đã dừng';
+    st.className = 'badge ' + (d.running ? 'b-success' : 'b-none');
+  } catch (e) {}
+  setTimeout(poll, 2000);
+}
+poll();
+</script>
+{% endblock %}

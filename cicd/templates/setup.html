@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:440px;margin:40px auto">
+  <h1>Thiết lập lần đầu</h1>
+  <p class="muted">Tạo mật khẩu quản trị để bảo vệ giao diện web CICD App.</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Mật khẩu (≥ 8 ký tự)</label><input type="password" name="password" required minlength="8" autofocus>
+    <label>Nhập lại mật khẩu</label><input type="password" name="password2" required minlength="8">
+    <p><button class="btn primary">Tạo mật khẩu</button></p>
+  </form>
+</div>
+{% endblock %}

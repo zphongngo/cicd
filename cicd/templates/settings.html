@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Cài đặt - CICD App{% endblock %}
+{% block content %}
+<h1>Cài đặt</h1>
+<div class="card">
+  <h2 style="margin-top:4px">Địa chỉ truy cập CICD App</h2>
+  {% if listen_host == '0.0.0.0' %}
+  <div class="small">Đang lắng nghe trên <b>mọi địa chỉ IP</b> của máy. Máy khác trong mạng mở được bằng:</div>
+  {% else %}
+  <div class="small">Đang lắng nghe tại <code>{{ listen_host }}</code>{% if listen_host.startswith('127.') %} - chỉ máy này truy cập được{% endif %}:</div>
+  {% endif %}
+  <ul style="margin:6px 0">{% for u in access_urls %}<li><a href="{{ u }}"><code>{{ u }}</code></a></li>{% endfor %}</ul>
+  <div class="hint">Địa chỉ IP có thể đổi khi đổi mạng/router. Chỉ cho chính máy này: khởi động với <code>--host 127.0.0.1</code>.
+    Bị chặn từ máy khác? Mở firewall cho cổng này (xem README).</div>
+</div>
+<form method="post" class="card">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+
+  <h2 style="margin-top:4px">Thư mục</h2>
+  <label>Thư mục chứa project mặc định</label>
+  <div class="inputgroup">
+    <input type="text" name="base_dir" id="base_dir" value="{{ f.base_dir }}" class="mono" required
+           placeholder="{{ 'C:\\App' if sep == '\\' else '/home/ten-ban/apps' }}">
+    <button type="button" class="btn" onclick="pickFolder('base_dir')">📁 Chọn thư mục</button>
+  </div>
+  <div class="hint">Khi tạo project, ô "Thư mục chứa project" sẽ điền sẵn thư mục này (bạn vẫn đổi được cho từng project).
+    Mỗi project được lưu trong một thư mục con mang tên project, vd: <code>{{ f.base_dir }}{{ sep }}worklog</code>.
+    Thư mục sẽ được tạo nếu chưa có.</div>
+
+  <h2>Bitbucket Server (bbk)</h2>
+  <div class="grid2">
+    <div><label>Bitbucket Server URL</label>
+      <input type="text" name="bbk_server" value="{{ f.bbk_server }}" placeholder="https://bbk-rndsoft.ingenico.com"></div>
+    <div><label>Username bbk của bạn</label>
+      <input type="text" name="bbk_username" value="{{ f.bbk_username }}" placeholder="username" autocomplete="off"></div>
+  </div>
+  <div class="hint">Khi đã điền, project mới sẽ mặc định chọn Bitbucket Server và tự điền URL repository theo dạng
+    <code>{{ f.bbk_server or 'https://bbk-rndsoft.ingenico.com' }}/scm/~{{ f.bbk_username or 'username' }}/&lt;tên project&gt;.git</code>.</div>
+
+  <p style="margin-top:18px"><button class="btn primary">Lưu</button></p>
+</form>
+{% endblock %}

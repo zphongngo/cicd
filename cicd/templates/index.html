@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row" style="margin-bottom:14px">
+  <h1 style="flex:1">Projects</h1>
+  <a class="btn primary" href="{{ url_for('project_new') }}">+ Tạo project</a>
+</div>
+<div class="small muted" style="margin:-6px 0 12px">📁 Thư mục gốc: <code>{{ base_dir }}</code> · <a href="{{ url_for('settings') }}">đổi</a></div>
+{% if not projects %}
+<div class="card">
+  <p>Chưa có dự án nào. Bấm <b>+ Thêm dự án</b> để kết nối repository GitHub hoặc Bitbucket.</p>
+</div>
+{% else %}
+<div class="card tablewrap" style="padding:4px 8px">
+<table>
+<tr><th>Tên</th><th>Repository</th><th>Nhánh</th><th>Run gần nhất</th><th>Tự động</th><th>App</th><th></th></tr>
+{% for p in projects %}
+<tr>
+  <td><a href="{{ url_for('project_view', pid=p.id) }}"><b>{{ p.name }}</b></a>
+    {% if p.last_poll_error %}<div class="small" style="color:var(--err)">⚠ Lỗi kết nối repo</div>{% endif %}</td>
+  <td class="small mono">{{ p.repo_url }}<div class="muted">📁 {{ p.deploy_dir }}</div></td>
+  <td><code>{{ p.branch }}</code></td>
+  <td>{% if p.last_run_id %}
+      <a href="{{ url_for('run_view', rid=p.last_run_id) }}"><span class="badge b-{{ p.last_run_status }}">{{ p.last_run_status }}</span></a>
+      <div class="small muted">{{ p.last_run_at|dt }}</div>
+      {% else %}<span class="badge b-none">chưa chạy</span>{% endif %}</td>
+  <td class="small">{% if not p.enabled %}Tắt{% elif p.poll_interval %}mỗi {{ p.poll_interval }}s{% else %}chỉ webhook{% endif %}</td>
+  <td>{% set st = app_state[p.id] %}
+      <span class="badge {{ 'b-success' if st else 'b-none' }}">{{ '● đang chạy' if st else ('○ đã dừng' if p.run_cmd else '○ chưa có lệnh') }}</span>
+      <form class="inline" method="post" action="{{ url_for('project_app', pid=p.id, action='stop' if st else 'start') }}"
+            {% if st %}onsubmit="return confirm('Tắt app {{ p.name }}?')"{% endif %}>
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="next" value="{{ url_for('index') }}">
+        <button class="btn {{ 'danger' if st }}" style="margin-top:4px">{{ '■ Tắt app' if st else '▶ Bật app' }}</button></form></td>
+  <td><form class="inline" method="post" action="{{ url_for('project_run', pid=p.id) }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn" title="Lấy code mới, cài môi trường, chạy lại app">▶ Chạy pipeline</button></form></td>
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if projects|selectattr('last_run_status', 'equalto', 'running')|list %}
+<script>setTimeout(() => location.reload(), 5000);  // có project đang chạy -> tự làm mới trạng thái</script>
+{% endif %}
+{% endblock %}

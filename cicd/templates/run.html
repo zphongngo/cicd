@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Run #{{ run.id }} - {{ run.project_name }}{% endblock %}
+{% block content %}
+<a class="small" href="{{ url_for('project_view', pid=run.project_id) }}">← {{ run.project_name }}</a>
+<div class="row" style="margin:2px 0 12px">
+  <h1 style="flex:1">Run #{{ run.id }} <span id="status" class="badge b-{{ run.status }}">{{ run.status }}</span></h1>
+  <a class="btn" href="{{ url_for('run_log_raw', rid=run.id) }}" target="_blank">Xem log dạng text</a>
+  <form class="inline" method="post" action="{{ url_for('project_run', pid=run.project_id) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn">↻ Chạy lại</button></form>
+</div>
+
+<div class="card kv small">
+  <div>Nhánh</div><div><code>{{ run.branch }}</code></div>
+  <div>Commit</div><div id="commit"><code>{{ (run.commit_sha or '')[:10] }}</code> {{ run.commit_msg or '' }}</div>
+  <div>Kích hoạt</div><div>{{ run.trigger }}</div>
+  <div>Bắt đầu</div><div>{{ run.started_at|dt }}</div>
+  <div>Thời gian</div><div id="duration">{{ run|dur }}</div>
+</div>
+
+<div class="card" id="progbox">
+  <div class="row"><b id="prog_step" style="flex:1">…</b><span class="small muted" id="prog_count"></span></div>
+  <div class="progress"><div id="prog_bar"></div></div>
+</div>
+
+<div id="errbox" class="errbox" {% if run.status != 'failed' %}hidden{% endif %}>
+  <b>✖ Thất bại tại bước: <span id="failed_step">{{ run.failed_step or '' }}</span></b>
+  <div class="small">Các dòng log cuối của bước bị lỗi (xem đầy đủ ở phần Log bên dưới):</div>
+  <pre id="errsum">{{ run.error_summary or '' }}</pre>
+</div>
+
+<h2>Các bước</h2>
+<div class="card tablewrap" style="padding:4px 8px">
+<table><thead><tr><th>#</th><th>Trạng thái</th><th>Bước</th><th>Lệnh</th><th>Exit</th><th>Thời gian</th></tr></thead>
+<tbody id="steps">
+{% for s in steps %}
+<tr><td>{{ s.idx }}</td><td><span class="badge b-{{ s.status }}">{{ s.status }}</span></td><td>{{ s.name }}</td>
+<td><code class="small">{{ s.command }}</code></td><td>{{ s.exit_code if s.exit_code is not none else '' }}</td><td class="small">{{ s|dur }}</td></tr>
+{% endfor %}
+</tbody></table></div>
+
+<div class="row" style="margin-top:24px"><h2 style="flex:1;margin:0 0 8px">Log</h2>
+  <label style="font-weight:400;margin:0"><input type="checkbox" id="follow" checked> Tự cuộn xuống cuối</label></div>
+<pre class="log" id="log"></pre>
+{% endblock %}
+{% block scripts %}
+<script>
+const API = "{{ url_for('run_api', rid=run.id) }}";
+let offset = 0;
+const logEl = document.getElementById('log');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function cls(line){
+  const t = line.slice(11);
+  if (t.startsWith('=====')) return t.includes('THẤT BẠI') ? 'e' : 'ok';
+  if (t.startsWith('==>')) return 'h';
+  if (t.startsWith('<==')) return t.includes('THÀNH CÔNG') ? 'ok' : 'e';
+  if (t.startsWith('!!') || /\b(error|fatal|failed|exception)\b/i.test(t)) return 'e';
+  if (t.startsWith('Gợi ý')) return 'g';
+  if (t.startsWith('$ ')) return 'c';
+  return '';
+}
+function renderSteps(steps){
+  document.getElementById('steps').innerHTML = steps.map(s =>
+    `<tr><td>${s.idx}</td><td><span class="badge b-${s.status}">${s.status}</span></td><td>${esc(s.name)}</td>` +
+    `<td><code class="small">${esc(s.command)}</code></td><td>${s.exit_code ?? ''}</td><td class="small">${s.duration}</td></tr>`).join('');
+}
+async function poll(){
+  let d;
+  try { d = await (await fetch(API + '?offset=' + offset)).json(); }
+  catch(e){ setTimeout(poll, 3000); return; }
+  if (d.log){
+    const lines = d.log.replace(/\n$/, '').split('\n');
+    const html = lines.map(l => { const c = cls(l); return c ? `<span class="${c}">${esc(l)}</span>` : esc(l); }).join('\n') + '\n';
+    logEl.insertAdjacentHTML('beforeend', html);
+    if (document.getElementById('follow').checked) logEl.scrollTop = logEl.scrollHeight;
+  }
+  offset = d.offset;
+  const st = document.getElementById('status'); st.textContent = d.status; st.className = 'badge b-' + d.status;
+  document.getElementById('duration').textContent = d.duration;
+  if (d.commit_sha) document.getElementById('commit').innerHTML = `<code>${esc(d.commit_sha.slice(0,10))}</code> ${esc(d.commit_msg || '')}`;
+  renderSteps(d.steps);
+  // Thanh tiến độ: Bước X/Y + tên bước đang chạy
+  const done = d.steps.filter(s => ['success', 'failed', 'skipped'].includes(s.status)).length;
+  const cur = d.steps.find(s => s.status === 'running');
+  const bar = document.getElementById('prog_bar');
+  bar.style.width = (d.status === 'running' ? Math.max(5, 100 * done / Math.max(d.steps.length, 1)) : 100) + '%';
+  bar.className = d.status === 'failed' ? 'err' : (d.status === 'success' ? 'ok' : '');
+  document.getElementById('prog_step').textContent =
+    d.status === 'running' ? (cur ? `⏳ Bước ${cur.idx}/${d.steps.length}: ${cur.name}` : '⏳ Đang chuẩn bị…')
+    : (d.status === 'success' ? '✔ Hoàn thành tất cả các bước' : '✖ Thất bại tại: ' + (d.failed_step || ''));
+  document.getElementById('prog_count').textContent = `${done}/${d.steps.length} bước · ${d.duration}`;
+  if (d.status === 'failed'){
+    document.getElementById('errbox').hidden = false;
+    document.getElementById('failed_step').textContent = d.failed_step || '';
+    document.getElementById('errsum').textContent = d.error_summary || '';
+  }
+  if (d.status === 'running') setTimeout(poll, 1500);
+  else if (d.log) setTimeout(poll, 50);   // đọc nốt phần log còn lại
+}
+poll();
+</script>
+{% endblock %}
